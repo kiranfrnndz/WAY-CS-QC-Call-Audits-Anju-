@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CS Quality Control — Leadership Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Libraries. See README "Third-party libraries" before changing either line.
+     SheetJS is loaded from the vendor's own CDN: the 0.18.5 build on npm/cdnjs is
+     abandoned and carries CVE-2023-30533 (prototype pollution on file read), which
+     is exactly the code path this page uses. For production, vendor both files into
+     the repo and load them from ./vendor/ so nothing is fetched at page load. -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  --paper:#EEF1F0; --panel:#FFFFFF; --ink:#12202B; --ink2:#42555F; --ink3:#77878E;
+  --line:#D5DCDA; --line2:#E7ECEA;
+  --tierA:#12695F; --tierB:#6E8F52; --tierC:#C08319; --tierD:#A8302A;
+  --good:#12695F; --warn:#B87514; --bad:#A8302A;
+  --radius:3px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-0.01em}
+button{font-family:inherit;font-size:inherit;cursor:pointer}
+a{color:var(--tierA)}
+
+/* ---------- shell ---------- */
+.masthead{
+  background:var(--ink); color:#E9EEEC; padding:18px 28px;
+  display:flex; align-items:flex-end; gap:24px; flex-wrap:wrap;
+  border-bottom:3px solid var(--tierA);
+}
+.masthead h1{font-size:19px; color:#fff}
+.masthead .sub{font-size:12.5px;color:#9DB0B4;margin-top:3px}
+.masthead .spacer{flex:1}
+.btn{
+  background:transparent;color:#E9EEEC;border:1px solid #46585F;
+  padding:7px 14px;border-radius:var(--radius);
+}
+.btn:hover{background:#1D303C;border-color:#6C8189}
+.btn.primary{background:var(--tierA);border-color:var(--tierA);color:#fff}
+.btn.primary:hover{background:#0E5750}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+.wrap{max-width:1440px;margin:0 auto;padding:0 28px 80px}
+
+/* ---------- dropzone ---------- */
+#intro{padding:64px 0 40px;max-width:720px}
+#intro h2{font-size:26px;line-height:1.25;margin-bottom:14px}
+#intro p{color:var(--ink2);margin:0 0 12px}
+#drop{
+  margin-top:26px;border:2px dashed var(--line);background:var(--panel);
+  border-radius:var(--radius);padding:44px 28px;text-align:center;transition:border-color .15s,background .15s;
+}
+#drop.hot{border-color:var(--tierA);background:#F2F8F6}
+#drop p{margin:8px 0 0;color:var(--ink3);font-size:13px}
+.privacy{
+  margin-top:26px;border-left:3px solid var(--tierA);background:#fff;
+  padding:14px 18px;font-size:13px;color:var(--ink2);
+}
+.privacy strong{color:var(--ink)}
+
+/* ---------- filter bar ---------- */
+.filters{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px 16px;margin-top:20px;display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;
+}
+.f{display:flex;flex-direction:column;gap:4px}
+.f label{font-size:11.5px;color:var(--ink3);letter-spacing:.02em}
+.f select,.f input{
+  font-family:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);
+  border-radius:var(--radius);background:#fff;color:var(--ink);min-width:132px;
+}
+.filters .note{margin-left:auto;font-size:12px;color:var(--ink3);text-align:right}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:2px;margin:22px 0 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{
+  background:transparent;border:none;border-bottom:2px solid transparent;
+  padding:9px 15px;color:var(--ink2);font-size:13.5px;
+}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--ink);border-bottom-color:var(--tierA);font-weight:600}
+.view{display:none;padding-top:26px}
+.view.on{display:block}
+
+/* ---------- panels ---------- */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin-bottom:20px}
+.panel > h3{font-size:14.5px;margin-bottom:3px}
+.panel > .cap{font-size:12.5px;color:var(--ink3);margin:0 0 16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+@media(max-width:1080px){.grid2,.grid3{grid-template-columns:1fr}}
+
+/* ---------- kpi ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.kpi{background:var(--panel);padding:14px 16px 15px}
+.kpi .k{font-size:12px;color:var(--ink3)}
+.kpi .v{font-size:27px;font-weight:600;letter-spacing:-0.02em;margin-top:5px;line-height:1}
+.kpi .d{font-size:11.5px;margin-top:6px;color:var(--ink3)}
+.kpi .d.up{color:var(--good)} .kpi .d.dn{color:var(--bad)}
+.kpi.risk .v{color:var(--tierD)}
+
+/* ---------- tier ribbon ---------- */
+.ribbon{display:flex;height:46px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line)}
+.ribbon div{display:flex;align-items:center;justify-content:center;color:#fff;font-size:12.5px;font-weight:500;min-width:0}
+.ribbon .a{background:var(--tierA)} .ribbon .b{background:var(--tierB)}
+.ribbon .c{background:var(--tierC)} .ribbon .d{background:var(--tierD)}
+.ribbon-legend{display:flex;gap:22px;margin-top:12px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2)}
+.ribbon-legend i{display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:1px}
+.riskbracket{margin-top:14px;padding:11px 14px;background:#FBF4EC;border-left:3px solid var(--tierC);font-size:13px;color:var(--ink2)}
+
+/* ---------- tables ---------- */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{
+  text-align:left;font-weight:600;color:var(--ink2);font-size:12px;
+  padding:7px 10px;border-bottom:1.5px solid var(--line);white-space:nowrap;
+}
+td{padding:7px 10px;border-bottom:1px solid var(--line2);vertical-align:middle}
+tbody tr:hover{background:#F6F9F8}
+td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{max-height:520px;overflow:auto}
+.scroll thead th{position:sticky;top:0;background:var(--panel);z-index:2}
+
+/* inline proportion bar inside a cell */
+.bar{position:relative;min-width:92px}
+.bar span{position:absolute;left:0;top:50%;transform:translateY(-50%);height:15px;background:#DCE6E2;border-radius:1px}
+.bar b{position:relative;font-weight:400;font-family:"IBM Plex Mono",monospace;padding-left:5px}
+
+.pill{display:inline-block;padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.pill.high{background:#F6E4E2;color:var(--tierD)}
+.pill.med{background:#FAF0DC;color:#8A5C0F}
+.pill.mon{background:#E4EDEA;color:var(--tierA)}
+.pill.a{background:#E1EEEB;color:var(--tierA)}
+.pill.d{background:#F6E4E2;color:var(--tierD)}
+
+/* heat cells */
+.heat{text-align:right;font-family:"IBM Plex Mono",monospace}
+
+.empty{color:var(--ink3);font-size:13px;padding:14px 0}
+.chartbox{position:relative;height:270px}
+.flag{border-left:3px solid var(--warn);background:#FCF7EE;padding:11px 14px;font-size:13px;color:var(--ink2);margin-bottom:12px}
+.flag.ok{border-left-color:var(--good);background:#F1F7F5}
+.flag b{color:var(--ink)}
+ul.tight{margin:8px 0 0;padding-left:18px} ul.tight li{margin-bottom:5px;color:var(--ink2)}
+.foot{font-size:12px;color:var(--ink3);margin-top:6px}
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <div>
+    <h1>Customer Success — Quality Control</h1>
+    <div class="sub" id="mastsub">Leadership view: coverage, quality, risk concentration and root cause</div>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn" id="btnLoad">Load audit file</button>
+  <button class="btn primary" id="btnExport" disabled>Export summary</button>
+  <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv" hidden>
+</div>
+
+<div class="wrap">
+
+  <section id="intro">
+    <h2>Drop in the monthly call audit export to build the dashboard.</h2>
+    <p>Every metric is calculated in this browser from the file you choose. Upload the same file again after each daily or weekly update and the whole dashboard recalculates — the period filter handles the rest.</p>
+    <div id="drop">
+      <button class="btn primary" id="btnLoad2">Choose audit file</button>
+      <p>or drag the .xlsx here</p>
+    </div>
+    <div class="privacy">
+      <strong>Your audit data never leaves this device.</strong> There is no server and no upload. Caller phone numbers, confirmation numbers and remarks are read but never displayed, exported or stored — they are dropped as soon as the file is parsed. Never commit the audit file itself to the repository that hosts this page.
+    </div>
+  </section>
+
+  <div id="app" hidden>
+
+    <div class="filters">
+      <div class="f"><label for="fPeriod">Period</label>
+        <select id="fPeriod">
+          <option value="all">All data in file</option>
+          <option value="mtd">Current month</option>
+          <option value="7">Last 7 days</option>
+          <option value="14">Last 14 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="custom">Custom range</option>
+        </select></div>
+      <div class="f" id="wrapFrom" hidden><label for="fFrom">From</label><input type="date" id="fFrom"></div>
+      <div class="f" id="wrapTo" hidden><label for="fTo">To</label><input type="date" id="fTo"></div>
+      <div class="f"><label for="fVert">Vertical</label><select id="fVert"><option value="">All verticals</option></select></div>
+      <div class="f"><label for="fType">Sample</label><select id="fType"><option value="">All audits</option></select></div>
+      <div class="f"><label for="fQc">QC auditor</label><select id="fQc"><option value="">All auditors</option></select></div>
+      <div class="f"><label for="fHead">Team headcount</label><input type="number" id="fHead" min="0" step="1" placeholder="e.g. 52" style="min-width:110px"></div>
+      <div class="note" id="fnote"></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab on" data-v="v-exec">Executive</button>
+      <button class="tab" data-v="v-risk">Risk analysis</button>
+      <button class="tab" data-v="v-root">Root cause</button>
+      <button class="tab" data-v="v-agent">Agents &amp; repeat risk</button>
+      <button class="tab" data-v="v-qc">QC team</button>
+      <button class="tab" data-v="v-qual">Data quality</button>
+    </div>
+
+    <!-- EXECUTIVE -->
+    <section class="view on" id="v-exec">
+      <div class="kpis" id="kpis"></div>
+
+      <div class="panel" style="margin-top:20px">
+        <h3>Quality distribution</h3>
+        <p class="cap">Feedback Category as scored by QC. Tier C and D together form the risk population — a coaching queue, not a verdict on the agent.</p>
+        <div class="ribbon" id="ribbon"></div>
+        <div class="ribbon-legend" id="ribbonLegend"></div>
+        <div class="riskbracket" id="riskBracket"></div>
+      </div>
+
+      <div class="panel">
+        <h3>What the sample is made of</h3>
+        <p class="cap">Random audits are the only representative read of quality. CSAT, targeted and complaint audits are opened because something already went wrong, so their scores measure the investigation, not the operation. Averaging them together produces a number that is neither.</p>
+        <div class="scroll"><table id="tBasis"></table></div>
+        <div class="riskbracket" id="basisNote"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <h3>Where the risk sits</h3>
+          <p class="cap">Ranked by risk rate, not raw volume, so small verticals are not hidden behind Airport.</p>
+          <div class="scroll"><table id="tRisk"></table></div>
+        </div>
+        <div class="panel">
+          <h3>Quality drivers</h3>
+          <p class="cap">Every line reads the same way: higher is better. Ranked by the size of the gap to 100%.</p>
+          <div class="scroll"><table id="tDrivers"></table></div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <h3>Audit coverage by vertical</h3>
+          <p class="cap">Where QC is sampling, against where the risk is being found.</p>
+          <div class="scroll"><table id="tVert"></table></div>
+        </div>
+        <div class="panel">
+          <h3>Audit strategy mix</h3>
+          <p class="cap">How the sample was selected.</p>
+          <table id="tType"></table>
+          <h3 style="margin-top:22px">Agent coverage</h3>
+          <div id="coverage"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Audit volume and score over time</h3>
+        <p class="cap">Grouped by audit week. Useful once several weeks are in the file.</p>
+        <div class="chartbox"><canvas id="chTrend"></canvas></div>
+      </div>
+
+      <div class="panel">
+        <h3>What this says</h3>
+        <div id="insights"></div>
+      </div>
+    </section>
+
+    <!-- RISK -->
+    <section class="view" id="v-risk">
+      <div class="flag">Two different percentages appear below and they answer different questions. <b>Share of vertical's exceptions</b> tells you which call reason dominates that vertical's problems. <b>Rate</b> tells you how often the problem occurs across all audits of that vertical — that is the one to use when comparing Airport against Hourly.</div>
+      <div class="panel"><h3>Policy compliance gaps</h3><p class="cap">Anything other than fully compliant with SOP, including minor deviations.</p><div class="scroll"><table id="rPolicy"></table></div></div>
+      <div class="panel"><h3>Follow-up failures</h3><p class="cap">Applicable follow-ups that were delayed or never done. Small population — treat as a signal, not a headline KPI.</p><div class="scroll"><table id="rFollow"></table></div></div>
+      <div class="panel"><h3>Tier C — needs improvement</h3><div class="scroll"><table id="rTierC"></table></div></div>
+      <div class="panel"><h3>Tier D — priority intervention</h3><div class="scroll"><table id="rTierD"></table></div></div>
+      <div class="panel"><h3>Handle time and hold time exceptions</h3><p class="cap">Excessive AHT or excessive/unnecessary hold time.</p><div class="scroll"><table id="rAht"></table></div></div>
+    </section>
+
+    <!-- ROOT CAUSE -->
+    <section class="view" id="v-root">
+      <div class="panel">
+        <h3>Agent, product or operations</h3>
+        <p class="cap">Issue Type by vertical. A risk audit is not automatically an agent failure — this is the layer that decides who owns the fix.</p>
+        <div class="scroll"><table id="tRoot"></table></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h3>Ownership of the risk population</h3>
+          <p class="cap">Issue Type across Tier C and D audits only. This is what decides whether the answer is coaching, a product fix or an ops fix.</p>
+          <div class="chartbox"><canvas id="chRoot"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>The "Others" problem</h3>
+          <div id="othersBox"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AGENTS -->
+    <section class="view" id="v-agent">
+      <div class="flag">Risk audits are shown against the agent's full audit count, so a agent with 12 risk audits out of 30 is never confused with one who has 12 out of 12. Sort by risk rate, not risk count.</div>
+      <div class="panel">
+        <h3>Repeat quality risk</h3>
+        <p class="cap">Agents with two or more Tier C/D audits in the period. A coaching queue for team leads — not an HR ranking.</p>
+        <div class="scroll"><table id="tRepeat"></table></div>
+      </div>
+      <div class="panel">
+        <h3>Recurring same-reason patterns</h3>
+        <p class="cap">The same agent, vertical and call reason appearing twice or more in the risk population. This points at a knowledge or process gap rather than a bad day.</p>
+        <div class="scroll"><table id="tPattern"></table></div>
+      </div>
+      <div class="panel">
+        <h3>All audited agents</h3>
+        <div class="scroll"><table id="tAgents"></table></div>
+      </div>
+    </section>
+
+    <!-- QC TEAM -->
+    <section class="view" id="v-qc">
+      <div class="flag">Scores are compared across auditors to surface calibration drift. A consistent gap in average score or tier mix between auditors usually means the rubric is being read differently, not that one auditor's agents are worse.</div>
+      <div class="panel">
+        <h3>Auditor output and calibration</h3>
+        <p class="cap">Volume, agents covered, and the score distribution each auditor produces.</p>
+        <div class="scroll"><table id="tQc"></table></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h3>Tier mix by auditor</h3>
+          <p class="cap">Materially different shapes here are a calibration conversation.</p>
+          <div class="chartbox"><canvas id="chQc"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>Feedback closure</h3>
+          <div id="fbBox"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DATA QUALITY -->
+    <section class="view" id="v-qual">
+      <div class="panel">
+        <h3>File summary</h3>
+        <div id="dqSummary"></div>
+      </div>
+      <div class="panel">
+        <h3>Call reason labels merged</h3>
+        <p class="cap">Spelling variants are grouped before any count is produced, otherwise the same issue splits across several rows and every total is understated. Every merge applied to your file is listed here so you can check it.</p>
+        <div class="scroll"><table id="tMerge"></table></div>
+      </div>
+      <div class="panel">
+        <h3>Response values in use</h3>
+        <p class="cap">Every score is matched against the exact wording of the audit form. If an option is reworded — even to fix a typo — the metric it feeds silently drops toward zero with no error. Check this list after any change to the form.</p>
+        <div id="valAlert"></div>
+        <div class="scroll"><table id="tValues"></table></div>
+      </div>
+      <div class="panel">
+        <h3>Field completeness</h3>
+        <div class="scroll"><table id="tBlank"></table></div>
+      </div>
+      <div class="panel">
+        <h3>Records needing attention</h3>
+        <div id="dqIssues"></div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   1. COLUMN RESOLUTION
+   Headers carry stray line breaks and drift between exports, so
+   columns are matched on a normalised key rather than exact text.
+============================================================ */
+const nk = s => String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const FIELDS = {
+  auditDate:  ["call audit date", "audit date"],
+  callDate:   ["call date"],
+  auditType:  ["audit type"],
+  agent:      ["agent name"],
+  vertical:   ["vertical"],
+  reason:     ["reason"],
+  subReason:  ["sub reason"],
+  callType:   ["call type"],
+  ahtBand:    ["aht"],
+  greeting:   ["greeting"],
+  verify:     ["verification"],
+  fluency:    ["language fluency grammar", "language fluency"],
+  empathy:    ["empathy personalization"],
+  conduct:    ["professional conduct language compliance", "professional conduct"],
+  hold:       ["hold acknowledgment", "hold acknowledgement"],
+  closure:    ["closure final impression"],
+  fcr:        ["first contact resolution"],
+  listening:  ["active listening ownership"],
+  policy:     ["policy compliance"],
+  crm:        ["crm ticket accuracy"],
+  script:     ["critical script disclosure adherence", "critical script"],
+  handleTime: ["handle time appropriateness"],
+  followup:   ["follow up timeliness"],
+  crossSell:  ["cross sell pitch"],
+  proactive:  ["proactive engagement"],
+  sentiment:  ["customer sentiment uplift"],
+  issueType:  ["issue type"],
+  qcAgent:    ["qc agent name"],
+  fbSent:     ["feedback sent"],
+  score:      ["total scores", "total score"],
+  tier:       ["feedback category"]
+};
+// Read but never surfaced. Listed so the exclusion is explicit and auditable.
+const PII = ["caller phone", "confirmation number", "remarks", "timestamp", "call duration"];
+
+function resolveColumns(headers) {
+  const keyed = headers.map(h => ({ raw: h, k: nk(h) }));
+  const map = {};
+  for (const field in FIELDS) {
+    for (const cand of FIELDS[field]) {
+      // sub reason must not steal the reason column, so exact match wins first
+      let hit = keyed.find(h => h.k === cand);
+      if (!hit) hit = keyed.find(h => h.k.includes(cand) && !(field === "reason" && h.k.includes("sub")));
+      if (hit) { map[field] = hit.raw; break; }
+    }
+  }
+  if (map.reason && map.subReason && map.reason === map.subReason) delete map.subReason;
+  return map;
+}
+
+/* ============================================================
+   2. CALL REASON NORMALISATION
+============================================================ */
+const REASON_ALIASES = {
+  "check in check out": "Check-In / Check-Out",
+  "check in checkout": "Check-In / Check-Out",
+  "check in check out guidance": "Check-In / Check-Out",
+  "check check out": "Check-In / Check-Out",
+  "checkin checkout": "Check-In / Check-Out",
+  "edit extend reservation": "Edit / Extend Reservation",
+  "edit or extend reservation": "Edit / Extend Reservation",
+  "edit extend the reservation": "Edit / Extend Reservation",
+  "edit extend": "Edit / Extend Reservation",
+  "reservation modification": "Reservation Modification",
+  "reservation modifications": "Reservation Modification",
+  "customer success request": "Customer Success Request",
+  "customer succes request": "Customer Success Request",
+  "customr success request": "Customer Success Request",
+  "call disconnected": "Call Disconnected",
+  "dialed wrong department": "Call Disconnected",
+  "pre booking enquiry": "Pre-Booking Enquiry",
+  "pre booking enquiries": "Pre-Booking Enquiry",
+  "pre booking queries": "Pre-Booking Enquiry",
+  "prebooking enquiry": "Pre-Booking Enquiry",
+  "prebooking booking queries": "Pre-Booking Enquiry",
+  "promo code issue": "Promo Code Issue",
+  "promocode issue": "Promo Code Issue",
+  "qr code issue": "QR Code Issue",
+  "rsa not placed": "RSA Not Placed",
+  "rsa enquiry": "RSA Enquiry",
+  "rsa status enquiry": "RSA Enquiry",
+  "reservation confirmation verification": "Reservation Confirmation / Verification",
+  "payment refund receipt": "Payment / Refund Receipt",
+  "lock out request": "Lockout Request",
+  "lockout request": "Lockout Request",
+  "trust and safety": "Trust and Safety",
+  "trust and safet": "Trust and Safety",
+  "personal situation": "Personal Situation",
+  "personal": "Personal Situation",
+  "lot issue": "Lot Issue",
+  "parking lot information": "Parking Lot Information",
+  "shuttle issue": "Shuttle Issue",
+  "shuttle enquiry": "Shuttle Enquiry",
+  "confirmation missing": "Confirmation Missing",
+  "mistake while booking": "Mistake while booking",
+  "booking assistance": "Booking Assistance",
+  "subscription cancellation": "Subscription Cancellation",
+  "subscription enquiry": "Subscription Enquiry",
+  "double booking": "Double Booking",
+  "citation received": "Citation Received",
+  "flight cancellation": "Flight Cancellation",
+  "flight missed": "Flight Missed",
+  "turned away": "Turned Away",
+  "lot full": "Lot Full",
+  "pay at lot": "Pay At Lot",
+  "towing": "Towing",
+  "waybucks": "Waybucks",
+  "general enquiry": "General Enquiry",
+  "enquiry": "General Enquiry",
+  "technical issues": "Technical Issues"
+};
+const UNKNOWN = "Unknown / not recorded";
+const mergeLog = new Map(); // canonical -> Map(original -> count)
+
+function canonReason(v) {
+  const raw = String(v == null ? "" : v).trim();
+  const k = nk(raw);
+  let out;
+  if (!k) out = UNKNOWN;
+  else if (/^(na|n a|nil|none|null)( .*)?$/.test(k)) out = UNKNOWN;                 // "Na", "na (no ticket created)"
+  else if (/^[a-z]{2,5}\s?\d{5,}$/.test(k)) out = UNKNOWN;                          // confirmation number typed into Reason
+  else out = REASON_ALIASES[k] || raw.replace(/\s+/g, " ");
+  if (out !== raw) {
+    if (!mergeLog.has(out)) mergeLog.set(out, new Map());
+    const m = mergeLog.get(out);
+    m.set(raw || "(blank)", (m.get(raw || "(blank)") || 0) + 1);
+  }
+  return out;
+}
+
+/* ============================================================
+   3. SCORING CONSTANTS  (from the QC logic guide)
+============================================================ */
+const PASS = {
+  fcr:      "Resolved fully in first contact",
+  policy:   "Fully compliant with SOP",
+  crm:      "Updated all fields properly",
+  script:   "Followed completely",
+  empathy:  "Demonstrated empathy & personalized responses",
+  greeting: "Greeting used appropriately (branded & clear)",
+  verify:   "Verification completed correctly",
+  listen:   "Actively listened & fully owned resolution",
+  closure:  "Closure script used appropriately",
+  hold:     "Informed before & after hold",
+  fluency:  "Clear, fluent & professional",
+  conduct:  "Professional, respectful & compliant",
+  followup: "Follow-up completed on time",
+  cross:    "Cross-sell pitched correctly",
+  proact:   "Proactively added value"
+};
+const AHT_EXC = ["excessive aht", "excessive unnecessary hold time"];
+const NA = "not applicable";
+const QA_THRESHOLD = 90;
+const REPEAT_MIN = 2;
+
+/* ============================================================
+   4. STATE
+============================================================ */
+let ALL = [], COLS = {}, VIEW = [], charts = {}, META = {};
+const THIN = 20;                       // below this, a rate is too noisy to act on
+const isRandomAudit = r => /random/i.test(r.auditType);
+// FNV-1a. Ties a screenshot or export back to the exact file version it came from.
+function fingerprint(rows) {
+  let h = 0x811c9dc5;
+  const s = rows.map(r => [r.agent, dayKey(r.auditDate), r.score, r.tier].join("|")).sort().join("\n");
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+const $ = id => document.getElementById(id);
+const pct = (x, d = 1) => (x == null || isNaN(x)) ? "—" : (x * 100).toFixed(d) + "%";
+const num = x => (x == null || isNaN(x)) ? "—" : x.toLocaleString();
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ============================================================
+   5. LOAD
+============================================================ */
+function pickSheet(wb) {
+  let best = null, bestCols = 0;
+  for (const name of wb.SheetNames) {
+    const ref = wb.Sheets[name]["!ref"];
+    if (!ref) continue;
+    const r = XLSX.utils.decode_range(ref);
+    const cols = r.e.c - r.s.c + 1, rows = r.e.r - r.s.r + 1;
+    if (/audit data|sheet1|raw/i.test(name) && cols > 20) return name;
+    if (cols > bestCols && rows > 1) { bestCols = cols; best = name; }
+  }
+  return best || wb.SheetNames[0];
+}
+
+function toDate(v) {
+  if (v instanceof Date && !isNaN(v)) return v;
+  if (typeof v === "number") { const d = XLSX.SSF.parse_date_code(v); return d ? new Date(d.y, d.m - 1, d.d) : null; }
+  if (typeof v === "string") { const d = new Date(v); return isNaN(d) ? null : d; }
+  return null;
+}
+const dayKey = d => d ? d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") : "";
+
+function loadFile(f) {
+  const fr = new FileReader();
+  fr.onload = e => {
+    let wb;
+    try { wb = XLSX.read(new Uint8Array(e.target.result), { type: "array", cellDates: true }); }
+    catch (err) { alert("That file could not be read as a spreadsheet. Export the audit sheet as .xlsx and try again."); return; }
+    const sheet = pickSheet(wb);
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { defval: null, raw: false, cellDates: true });
+    if (!rows.length) { alert("The sheet \"" + sheet + "\" has no data rows."); return; }
+    COLS = resolveColumns(Object.keys(rows[0]));
+    const missing = ["agent", "vertical", "reason", "score", "tier"].filter(k => !COLS[k]);
+    if (missing.length) {
+      alert("This does not look like the call audit export. Missing column(s): " + missing.join(", ") + ".");
+      return;
+    }
+    mergeLog.clear();
+    ALL = rows.map(r => build(r)).filter(r => r.score != null || r.tier);
+    if (!ALL.length) { alert("No scored audit rows found in that file."); return; }
+    META = { file: f.name, sheet, loaded: new Date(), fingerprint: fingerprint(ALL) };
+    initFilters(f.name, sheet);
+    $("intro").hidden = true; $("app").hidden = false; $("btnExport").disabled = false;
+    apply();
+  };
+  fr.readAsArrayBuffer(f);
+}
+
+function build(r) {
+  const g = k => COLS[k] ? r[COLS[k]] : null;
+  const t = k => { const v = g(k); return v == null ? "" : String(v).trim(); };
+  const rawReason = t("reason");
+  const scoreRaw = g("score");
+  const score = scoreRaw == null || scoreRaw === "" ? null : parseFloat(String(scoreRaw).replace(/[^0-9.\-]/g, ""));
+  return {
+    auditDate: toDate(g("auditDate")),
+    callDate:  toDate(g("callDate")),
+    auditType: t("auditType") || "Not recorded",
+    agent:     t("agent") || "Not recorded",
+    vertical:  t("vertical") || "Not recorded",
+    reasonRaw: rawReason,
+    reason:    canonReason(rawReason),
+    callType:  t("callType"),
+    ahtBand:   t("ahtBand"),
+    empathy:   t("empathy"), greeting: t("greeting"), verify: t("verify"),
+    fluency:   t("fluency"), conduct: t("conduct"), hold: t("hold"),
+    closure:   t("closure"), listening: t("listening"),
+    fcr:       t("fcr"), policy: t("policy"), crm: t("crm"), script: t("script"),
+    handleTime: t("handleTime"), followup: t("followup"),
+    crossSell: t("crossSell"), proactive: t("proactive"), sentiment: t("sentiment"),
+    issueType: t("issueType") || "Not recorded",
+    qcAgent:   t("qcAgent") || "Not recorded",
+    fbSent:    t("fbSent"),
+    score:     (score == null || isNaN(score)) ? null : score,
+    tier:      t("tier") || "Not recorded"
+  };
+}
+
+/* ============================================================
+   6. DERIVED FLAGS
+============================================================ */
+const isTierC = r => r.tier === "Tier C";
+const isTierD = r => r.tier === "Tier D";
+const isRisk  = r => isTierC(r) || isTierD(r);
+const isPolicyGap = r => r.policy && r.policy !== PASS.policy;
+const isFollowFail = r => r.followup && nk(r.followup) !== NA && r.followup !== PASS.followup;
+const isAht = r => r.handleTime && AHT_EXC.includes(nk(r.handleTime));
+
+/* ============================================================
+   7. FILTERS
+============================================================ */
+function initFilters(fileName, sheet) {
+  const fill = (id, vals) => {
+    const s = $(id), keep = s.value;
+    s.innerHTML = s.options[0].outerHTML + vals.map(v => `<option>${esc(v)}</option>`).join("");
+    if (vals.includes(keep)) s.value = keep;
+  };
+  const uniq = k => [...new Set(ALL.map(r => r[k]))].filter(Boolean).sort();
+  fill("fVert", uniq("vertical")); fill("fQc", uniq("qcAgent"));
+  const types = uniq("auditType");
+  $("fType").innerHTML = '<option value="">All audits</option>' +
+    '<optgroup label="By sample basis">' +
+      '<option value="~rep">Random audits only — representative</option>' +
+      '<option value="~inv">Investigative only — CSAT, targeted, complaint</option>' +
+    '</optgroup><optgroup label="By audit type">' +
+      types.map(v => `<option>${esc(v)}</option>`).join("") + '</optgroup>';
+  const ds = ALL.map(r => r.auditDate).filter(Boolean).sort((a, b) => a - b);
+  if (ds.length) { $("fFrom").value = dayKey(ds[0]); $("fTo").value = dayKey(ds[ds.length - 1]); }
+  $("mastsub").textContent = fileName + " · sheet " + sheet + " · " + ALL.length.toLocaleString() +
+    " audit records · fingerprint " + META.fingerprint;
+  ["fPeriod", "fVert", "fType", "fQc", "fFrom", "fTo"].forEach(id => $(id).addEventListener("change", apply));
+  $("fHead").addEventListener("input", () => renderCoverage(VIEW));
+  $("fPeriod").addEventListener("change", () => {
+    const c = $("fPeriod").value === "custom";
+    $("wrapFrom").hidden = !c; $("wrapTo").hidden = !c;
+  });
+}
+
+function windowFor(mode) {
+  const ds = ALL.map(r => r.auditDate).filter(Boolean).sort((a, b) => a - b);
+  if (!ds.length) return null;
+  const last = ds[ds.length - 1];
+  if (mode === "all") return { from: ds[0], to: last };
+  if (mode === "mtd") return { from: new Date(last.getFullYear(), last.getMonth(), 1), to: last };
+  if (mode === "custom") {
+    const f = $("fFrom").value ? new Date($("fFrom").value + "T00:00:00") : ds[0];
+    const t = $("fTo").value ? new Date($("fTo").value + "T23:59:59") : last;
+    return { from: f, to: t };
+  }
+  const n = parseInt(mode, 10);
+  const from = new Date(last); from.setDate(from.getDate() - (n - 1)); from.setHours(0, 0, 0, 0);
+  return { from, to: last };
+}
+
+function apply() {
+  const w = windowFor($("fPeriod").value);
+  const v = $("fVert").value, ty = $("fType").value, qc = $("fQc").value;
+  const inWin = (r, win) => !win || !r.auditDate || (r.auditDate >= win.from && r.auditDate <= new Date(win.to.getFullYear(), win.to.getMonth(), win.to.getDate(), 23, 59, 59));
+  const typeOk = r => !ty ? true
+    : ty === "~rep" ? isRandomAudit(r)
+    : ty === "~inv" ? !isRandomAudit(r)
+    : r.auditType === ty;
+  const match = r => (!v || r.vertical === v) && typeOk(r) && (!qc || r.qcAgent === qc);
+  VIEW = ALL.filter(r => match(r) && inWin(r, w));
+
+  // previous window of equal length, for the deltas
+  let prev = [];
+  if (w) {
+    const span = Math.max(1, Math.round((w.to - w.from) / 86400000) + 1);
+    const pTo = new Date(w.from); pTo.setDate(pTo.getDate() - 1);
+    const pFrom = new Date(pTo); pFrom.setDate(pFrom.getDate() - (span - 1));
+    prev = ALL.filter(r => match(r) && r.auditDate && r.auditDate >= pFrom && r.auditDate <= new Date(pTo.getFullYear(), pTo.getMonth(), pTo.getDate(), 23, 59, 59));
+  }
+  const fmt = d => d ? d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—";
+  $("fnote").innerHTML = VIEW.length.toLocaleString() + " of " + ALL.length.toLocaleString() + " audits<br>" +
+    (w ? fmt(w.from) + " – " + fmt(w.to) : "");
+  render(VIEW, prev);
+}
+
+/* ============================================================
+   8. METRICS
+============================================================ */
+function metrics(rows) {
+  const n = rows.length;
+  const share = f => n ? rows.filter(f).length / n : null;
+  const scored = rows.filter(r => r.score != null);
+  const appl = (field, passVal) => {
+    const a = rows.filter(r => r[field] && nk(r[field]) !== NA);
+    return a.length ? { rate: a.filter(r => r[field] === passVal).length / a.length, base: a.length } : { rate: null, base: 0 };
+  };
+  const htKnown = rows.filter(r => r.handleTime);
+  return {
+    n,
+    agents: new Set(rows.map(r => r.agent)).size,
+    avgQA: scored.length ? scored.reduce((s, r) => s + r.score, 0) / scored.length / 100 : null,
+    ge90: scored.length ? scored.filter(r => r.score >= QA_THRESHOLD).length / scored.length : null,
+    fcr: share(r => r.fcr === PASS.fcr),
+    policy: share(r => r.policy === PASS.policy),
+    crm: share(r => r.crm === PASS.crm),
+    script: share(r => r.script === PASS.script),
+    empathy: share(r => r.empathy === PASS.empathy),
+    greeting: share(r => r.greeting === PASS.greeting),
+    verify: share(r => r.verify === PASS.verify),
+    listening: share(r => r.listening === PASS.listen),
+    closure: share(r => r.closure === PASS.closure),
+    hold: share(r => r.hold === PASS.hold),
+    fluency: share(r => r.fluency === PASS.fluency),
+    conduct: share(r => r.conduct === PASS.conduct),
+    tierA: rows.filter(r => r.tier === "Tier A").length,
+    tierB: rows.filter(r => r.tier === "Tier B").length,
+    tierC: rows.filter(isTierC).length,
+    tierD: rows.filter(isTierD).length,
+    ahtErr: rows.filter(isAht).length,
+    ahtBase: htKnown.length,
+    ahtOk: htKnown.length ? htKnown.filter(r => !isAht(r)).length / htKnown.length : null,
+    followup: appl("followup", PASS.followup),
+    cross: appl("crossSell", PASS.cross),
+    proactive: appl("proactive", PASS.proact)
+  };
+}
+
+/* ============================================================
+   9. RENDER
+============================================================ */
+function render(rows, prev) {
+  const m = metrics(rows), p = prev && prev.length ? metrics(prev) : null;
+  renderKpis(m, p, prev);
+  renderRibbon(m);
+  renderBasis(rows);
+  renderRiskTable(rows);
+  renderDrivers(m);
+  renderVerticals(rows, m);
+  renderTypes(rows, m);
+  renderCoverage(rows);
+  renderTrend(rows);
+  renderInsights(rows, m);
+  renderRiskViews(rows);
+  renderRoot(rows, m);
+  renderAgents(rows);
+  renderQc(rows, m);
+  renderQuality(rows, m);
+}
+
+function kpi(label, value, delta, cls) {
+  let d = "";
+  if (delta != null && isFinite(delta) && Math.abs(delta) >= 0.0005) {
+    const up = delta > 0;
+    d = `<div class="d ${up ? "up" : "dn"}">${up ? "▲" : "▼"} ${Math.abs(delta * 100).toFixed(1)} pts vs prior period</div>`;
+  } else if (delta != null) { d = `<div class="d">level with prior period</div>`; }
+  return `<div class="kpi ${cls || ""}"><div class="k">${label}</div><div class="v mono">${value}</div>${d}</div>`;
+}
+
+function renderKpis(m, p, prevRows) {
+  const d = k => p && m[k] != null && p[k] != null ? m[k] - p[k] : null;
+  $("kpis").innerHTML =
+    kpi("Audits", num(m.n)) +
+    kpi("Agents audited", num(m.agents)) +
+    kpi("Average QA", pct(m.avgQA), d("avgQA")) +
+    kpi("Scoring 90% or above", pct(m.ge90), d("ge90")) +
+    kpi("First contact resolution", pct(m.fcr), d("fcr")) +
+    kpi("SOP compliance", pct(m.policy), d("policy")) +
+    kpi("CRM accuracy", pct(m.crm), d("crm")) +
+    kpi("Critical script", pct(m.script), d("script")) +
+    kpi("Risk audits (C+D)", num(m.tierC + m.tierD) + " · " + pct(m.n ? (m.tierC + m.tierD) / m.n : null, 1), null, "risk") +
+    kpi("Handle time exceptions", num(m.ahtErr) + " · " + pct(m.ahtBase ? m.ahtErr / m.ahtBase : null, 1), null, "risk");
+}
+
+function renderRibbon(m) {
+  const n = m.n || 1;
+  const seg = [["a", "Tier A", m.tierA, "Healthy"], ["b", "Tier B", m.tierB, "Minor gaps"],
+               ["c", "Tier C", m.tierC, "Needs improvement"], ["d", "Tier D", m.tierD, "Priority intervention"]];
+  $("ribbon").innerHTML = seg.map(([c, l, v]) =>
+    v ? `<div class="${c}" style="flex:${v}" title="${l}: ${v}">${(v / n) >= 0.07 ? pct(v / n, 1) : ""}</div>` : "").join("");
+  $("ribbonLegend").innerHTML = seg.map(([c, l, v, meaning]) =>
+    `<span><i style="background:var(--tier${c.toUpperCase()})"></i>${l} — ${num(v)} · ${pct(v / n, 1)} <span style="color:var(--ink3)">${meaning}</span></span>`).join("");
+  const risk = m.tierC + m.tierD;
+  $("riskBracket").innerHTML = `<b>${num(risk)} audits (${pct(risk / n, 1)}) sit in the risk population</b> — ${num(m.tierC)} needing improvement and ${num(m.tierD)} needing priority intervention. Root cause decides whether each one is a coaching case, a product fix or an ops fix.`;
+}
+
+function renderBasis(rows) {
+  const block = sub => {
+    const n = sub.length; if (!n) return null;
+    const mm = metrics(sub);
+    return { n, avg: mm.avgQA, ge90: mm.ge90, risk: (mm.tierC + mm.tierD) / n,
+             d: mm.tierD, aht: mm.ahtBase ? mm.ahtErr / mm.ahtBase : null,
+             pol: sub.filter(isPolicyGap).length / n };
+  };
+  const rep_ = block(rows.filter(isRandomAudit));
+  const inv = block(rows.filter(r => !isRandomAudit(r)));
+  const types = [...new Set(rows.map(r => r.auditType))]
+    .map(t => ({ t, ...block(rows.filter(r => r.auditType === t)) }))
+    .sort((a, b) => b.n - a.n);
+  const row = (label, x, cls) => x ? `<tr${cls ? ` style="${cls}"` : ""}><td>${esc(label)}</td>
+      <td class="n">${x.n}</td><td class="n">${pct(x.n / rows.length, 1)}</td>
+      <td class="n">${x.avg != null ? (x.avg * 100).toFixed(1) + "%" : "—"}</td>
+      <td class="n">${pct(x.ge90, 1)}</td><td class="n">${pct(x.risk, 1)}</td>
+      <td class="n">${x.d}</td><td class="n">${pct(x.aht, 1)}</td><td class="n">${pct(x.pol, 1)}</td></tr>` : "";
+  $("tBasis").innerHTML =
+    `<thead><tr><th>Sample</th><th class="n">Audits</th><th class="n">Share</th><th class="n">Avg QA</th>
+     <th class="n">≥90%</th><th class="n">Risk rate</th><th class="n">Tier D</th><th class="n">AHT exceptions</th><th class="n">Policy gaps</th></tr></thead><tbody>` +
+    row("Representative — random audits", rep_, "font-weight:600;background:#F1F7F5") +
+    row("Investigative — opened for a reason", inv, "font-weight:600;background:#FBF4EC") +
+    types.map(x => row(" " + x.t, x)).join("") +
+    `</tbody>`;
+  let note = "";
+  if (rep_ && inv) {
+    const gap = (inv.risk - rep_.risk) * 100;
+    note = `<b>The quality read is ${(rep_.avg * 100).toFixed(1)}% on ${rep_.n} random audits</b>, with a ${pct(rep_.risk, 1)} risk rate. ` +
+      `The ${inv.n} investigative audits run at ${pct(inv.risk, 1)} risk — ` +
+      (gap > 3 ? `${gap.toFixed(1)} points higher, which is the targeting working as intended, not a separate quality problem. ` :
+       gap < -3 ? `${Math.abs(gap).toFixed(1)} points <em>lower</em> than the random sample, which is worth investigating: audits opened because something went wrong should not be finding less risk. ` :
+       `broadly level with the random sample, which suggests the targeting criteria are not selecting the calls they are meant to. `) +
+      `Quote the random figure as quality. Quote the investigative figure as findings. Never quote the blend without saying what is in it.`;
+  } else if (rep_) { note = `This selection contains only random audits, so every figure on this page is a representative quality read.`; }
+  else if (inv) { note = `<b>This selection contains no random audits.</b> Every figure here comes from calls opened because something already went wrong, so none of it should be read as the quality level of the operation.`; }
+  $("basisNote").innerHTML = note;
+}
+
+function renderRiskTable(rows) {
+  const by = {};
+  rows.forEach(r => {
+    const v = by[r.vertical] || (by[r.vertical] = { n: 0, c: 0, d: 0, aht: 0, pol: 0 });
+    v.n++; if (isTierC(r)) v.c++; if (isTierD(r)) v.d++; if (isAht(r)) v.aht++; if (isPolicyGap(r)) v.pol++;
+  });
+  const list = Object.entries(by).map(([k, v]) => ({ vertical: k, ...v, rate: v.n ? (v.c + v.d) / v.n : 0 }))
+    .sort((a, b) => b.rate - a.rate || b.n - a.n);
+  const max = Math.max(...list.map(x => x.rate), 0.0001);
+  $("tRisk").innerHTML =
+    `<thead><tr><th>Vertical</th><th class="n">Audits</th><th class="n">Tier C</th><th class="n">Tier D</th><th class="n">AHT</th><th class="n">Policy gaps</th><th>Risk rate</th></tr></thead><tbody>` +
+    list.map(x => `<tr><td>${esc(x.vertical)}</td><td class="n">${x.n}</td><td class="n">${x.c}</td>
+      <td class="n">${x.d}</td><td class="n">${x.aht}</td><td class="n">${x.pol}</td>
+      <td class="bar"><span style="width:${(x.rate / max * 100).toFixed(1)}%"></span><b>${pct(x.rate, 1)}${x.n < THIN ? ' <span class="lown" title="Too few audits to act on this rate">†</span>' : ""}</b></td></tr>`).join("") +
+    `</tbody>`;
+  const thinN = list.filter(x => x.n < THIN).length;
+  $("tRisk").insertAdjacentHTML("beforeend",
+    `<tfoot><tr><td colspan="7" class="foot">Risk rate = (Tier C + Tier D) ÷ audits in that vertical.${thinN ? ` <span class="lown">†</span> ${thinN} vertical${thinN > 1 ? "s have" : " has"} fewer than ${THIN} audits — one audit moves the rate several points, so these belong in a watch list, not on a slide.` : ""}</td></tr></tfoot>`);
+}
+
+function renderDrivers(m) {
+  const rows = [
+    ["Policy compliance", m.policy], ["Empathy and personalisation", m.empathy],
+    ["Critical script and disclosure", m.script], ["CRM / ticket accuracy", m.crm],
+    ["Within handle time", m.ahtOk], ["Closure and final impression", m.closure],
+    ["Hold acknowledgment", m.hold], ["Active listening and ownership", m.listening],
+    ["First contact resolution", m.fcr], ["Language fluency", m.fluency],
+    ["Greeting", m.greeting], ["Professional conduct", m.conduct], ["Verification", m.verify],
+    ["Follow-up on time (applicable only)", m.followup.rate],
+    ["Cross-sell pitched (applicable only)", m.cross.rate]
+  ].filter(r => r[1] != null).sort((a, b) => a[1] - b[1]);
+  const sig = v => v < 0.85 ? ["High", "d"] : v < 0.92 ? ["Watch", ""] : ["Healthy", "a"];
+  $("tDrivers").innerHTML =
+    `<thead><tr><th>Driver</th><th>Result</th><th class="n">Gap to 100%</th><th>Signal</th></tr></thead><tbody>` +
+    rows.map(([l, v]) => { const [s, c] = sig(v);
+      return `<tr><td>${esc(l)}</td><td class="bar"><span style="width:${(v * 100).toFixed(1)}%"></span><b>${pct(v, 1)}</b></td>
+      <td class="n">${((1 - v) * 100).toFixed(1)} pts</td><td><span class="pill ${c || "med"}">${s}</span></td></tr>`; }).join("") +
+    `</tbody>`;
+}
+
+function renderVerticals(rows, m) {
+  const by = {};
+  rows.forEach(r => { const v = by[r.vertical] || (by[r.vertical] = { n: 0, risk: 0, s: 0, sc: 0 });
+    v.n++; if (isRisk(r)) v.risk++; if (r.score != null) { v.s += r.score; v.sc++; } });
+  const list = Object.entries(by).map(([k, v]) => ({ v: k, ...v })).sort((a, b) => b.n - a.n);
+  const max = Math.max(...list.map(x => x.n), 1);
+  $("tVert").innerHTML =
+    `<thead><tr><th>Vertical</th><th>Share of audits</th><th class="n">Audits</th><th class="n">Avg QA</th><th class="n">Risk rate</th></tr></thead><tbody>` +
+    list.map(x => `<tr><td>${esc(x.v)}</td>
+      <td class="bar"><span style="width:${(x.n / max * 100).toFixed(1)}%"></span><b>${pct(x.n / m.n, 1)}</b></td>
+      <td class="n">${x.n}</td><td class="n">${x.sc ? (x.s / x.sc).toFixed(1) + "%" : "—"}</td>
+      <td class="n">${pct(x.risk / x.n, 1)}${x.n < THIN ? ' <span class="lown">†</span>' : ""}</td></tr>`).join("") + `</tbody>` +
+    `<tfoot><tr><td colspan="5" class="foot"><span class="lown">†</span> fewer than ${THIN} audits — rate is indicative only.</td></tr></tfoot>`;
+}
+
+function renderTypes(rows, m) {
+  const by = {};
+  rows.forEach(r => { const v = by[r.auditType] || (by[r.auditType] = { n: 0, risk: 0 }); v.n++; if (isRisk(r)) v.risk++; });
+  const list = Object.entries(by).sort((a, b) => b[1].n - a[1].n);
+  $("tType").innerHTML =
+    `<thead><tr><th>Audit type</th><th class="n">Audits</th><th class="n">Share</th><th class="n">Risk rate</th></tr></thead><tbody>` +
+    list.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="n">${v.n}</td><td class="n">${pct(v.n / m.n, 1)}</td><td class="n">${pct(v.risk / v.n, 1)}</td></tr>`).join("") + `</tbody>`;
+}
+
+function renderCoverage(rows) {
+  const by = {};
+  rows.forEach(r => by[r.agent] = (by[r.agent] || 0) + 1);
+  const counts = Object.values(by).sort((a, b) => a - b);
+  const audited = counts.length;
+  const head = parseInt($("fHead").value, 10);
+  const thin = counts.filter(c => c < 3).length;
+  const med = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
+  let html = `<ul class="tight">
+    <li><b>${audited}</b> agents audited, ${rows.length} audits — median ${med} audits per agent, range ${counts[0] || 0}–${counts[counts.length - 1] || 0}.</li>
+    <li><b>${thin}</b> agents have fewer than 3 audits in this period; their scores are too thin to act on individually.</li>`;
+  if (head && head > 0) {
+    const cov = audited / head;
+    html += `<li>Coverage against a ${head}-agent team: <b>${pct(cov, 1)}</b>${cov < 1 ? ` — ${head - audited} agents were not audited at all.` : "."}</li>`;
+  } else {
+    html += `<li style="color:var(--ink3)">Enter your team headcount in the filter bar to show coverage as a percentage.</li>`;
+  }
+  $("coverage").innerHTML = html + "</ul>";
+}
+
+function weekKey(d) {
+  const t = new Date(d); t.setHours(0, 0, 0, 0);
+  t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); // Monday
+  return dayKey(t);
+}
+function renderTrend(rows) {
+  const by = new Map();
+  rows.filter(r => r.auditDate).forEach(r => {
+    const k = weekKey(r.auditDate);
+    const v = by.get(k) || { n: 0, s: 0, sc: 0, risk: 0 }; v.n++; v.risk += isRisk(r) ? 1 : 0;
+    if (r.score != null) { v.s += r.score; v.sc++; } by.set(k, v);
+  });
+  const keys = [...by.keys()].sort();
+  if (charts.trend) charts.trend.destroy();
+  if (!keys.length) return;
+  charts.trend = new Chart($("chTrend"), {
+    data: {
+      labels: keys.map(k => new Date(k + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })),
+      datasets: [
+        { type: "bar", label: "Audits", data: keys.map(k => by.get(k).n), backgroundColor: "#C9D6D2", yAxisID: "y", order: 2 },
+        { type: "bar", label: "Risk audits (C+D)", data: keys.map(k => by.get(k).risk), backgroundColor: "#A8302A", yAxisID: "y", order: 2 },
+        { type: "line", label: "Average QA %", data: keys.map(k => { const v = by.get(k); return v.sc ? +(v.s / v.sc).toFixed(1) : null; }),
+          borderColor: "#12695F", backgroundColor: "#12695F", yAxisID: "y1", tension: .3, pointRadius: 3, order: 1 }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+      scales: {
+        y: { beginAtZero: true, title: { display: true, text: "Audits" }, grid: { color: "#EAEFED" } },
+        y1: { position: "right", suggestedMin: 70, suggestedMax: 100, title: { display: true, text: "Avg QA %" }, grid: { drawOnChartArea: false } },
+        x: { grid: { display: false } }
+      },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12 } } }
+    }
+  });
+}
+
+function topReason(rows) {
+  const c = {}; rows.forEach(r => c[r.reason] = (c[r.reason] || 0) + 1);
+  // count first, then label, so a tie resolves the same way on every run and every file
+  const e = Object.entries(c).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  return e ? { label: e[0], n: e[1] } : { label: "—", n: 0 };
+}
+
+function renderInsights(rows, m) {
+  const byV = {};
+  rows.forEach(r => { const v = byV[r.vertical] || (byV[r.vertical] = { n: 0, risk: 0 }); v.n++; if (isRisk(r)) v.risk++; });
+  const big = Object.entries(byV).sort((a, b) => b[1].n - a[1].n)[0];
+  const worst = Object.entries(byV).filter(([, v]) => v.n >= 20).sort((a, b) => (b[1].risk / b[1].n) - (a[1].risk / a[1].n))[0];
+  const tr = topReason(rows.filter(isRisk));
+  const drivers = [["policy compliance", m.policy], ["empathy", m.empathy], ["critical script", m.script], ["CRM accuracy", m.crm]]
+    .filter(d => d[1] != null).sort((a, b) => a[1] - b[1]);
+  const repeat = repeatAgents(rows);
+  const li = [];
+  if (big) li.push(`${esc(big[0])} carries ${pct(big[1].n / m.n, 1)} of the audit sample and ${big[1].risk} risk audits — volume, not necessarily the worst quality.`);
+  if (worst) li.push(`Highest risk rate on a meaningful sample: ${esc(worst[0])} at ${pct(worst[1].risk / worst[1].n, 1)} of its ${worst[1].n} audits.`);
+  if (tr.n) li.push(`The single largest driver of risk audits is <b>${esc(tr.label)}</b> (${tr.n} of ${m.tierC + m.tierD}). One reason repeating across agents points at SOP or product, not individual coaching.`);
+  if (drivers.length) li.push(`Weakest quality drivers: ${drivers.slice(0, 3).map(d => `${d[0]} ${pct(d[1], 1)}`).join(", ")}.`);
+  if (m.ahtBase) li.push(`${m.ahtErr} handle-time exceptions, ${pct(m.ahtErr / m.ahtBase, 1)} of audits where handle time was assessed.`);
+  li.push(`${repeat.length} agents meet the repeat quality risk threshold (${REPEAT_MIN}+ Tier C/D audits) and form this period's coaching queue.`);
+  $("insights").innerHTML = `<ul class="tight">${li.map(x => `<li>${x}</li>`).join("")}</ul>`;
+}
+
+/* ---------- risk analysis tab ---------- */
+function vrTable(elId, rows, all, limit) {
+  const totalByVert = {};
+  all.forEach(r => totalByVert[r.vertical] = (totalByVert[r.vertical] || 0) + 1);
+  const excByVert = {}; rows.forEach(r => excByVert[r.vertical] = (excByVert[r.vertical] || 0) + 1);
+  const c = {};
+  rows.forEach(r => { const k = r.vertical + "||" + r.reason; c[k] = (c[k] || 0) + 1; });
+  const list = Object.entries(c).map(([k, n]) => { const [v, rsn] = k.split("||"); return { v, rsn, n }; })
+    .sort((a, b) => b.n - a.n).slice(0, limit || 40);
+  const el = $(elId);
+  if (!list.length) { el.innerHTML = `<tbody><tr><td class="empty">No records match this exception in the selected period.</td></tr></tbody>`; return; }
+  el.innerHTML =
+    `<thead><tr><th>Vertical</th><th>Call reason</th><th class="n">Count</th><th class="n">Share of vertical's exceptions</th><th class="n">Rate within vertical</th><th class="n">Share of all audits</th></tr></thead><tbody>` +
+    list.map(x => `<tr><td>${esc(x.v)}</td><td>${esc(x.rsn)}</td><td class="n">${x.n}</td>
+      <td class="n">${pct(x.n / (excByVert[x.v] || 1), 1)}</td>
+      <td class="n">${pct(x.n / (totalByVert[x.v] || 1), 1)}</td>
+      <td class="n">${pct(x.n / (all.length || 1), 2)}</td></tr>`).join("") + `</tbody>` +
+    `<tfoot><tr><td colspan="6" class="foot">${rows.length} exception records across ${Object.keys(excByVert).length} verticals. Showing the ${list.length} largest vertical–reason combinations.</td></tr></tfoot>`;
+}
+function renderRiskViews(rows) {
+  vrTable("rPolicy", rows.filter(isPolicyGap), rows);
+  vrTable("rFollow", rows.filter(isFollowFail), rows);
+  vrTable("rTierC", rows.filter(isTierC), rows);
+  vrTable("rTierD", rows.filter(isTierD), rows);
+  vrTable("rAht", rows.filter(isAht), rows);
+}
+
+/* ---------- root cause ---------- */
+const ISSUE_ORDER = ["No Issues", "Others", "Product Issue", "Agent Issue", "Agent Issue & Product Issue", "Product & Ops Issue", "Ops Issue"];
+function renderRoot(rows, m) {
+  const types = [...new Set(rows.map(r => r.issueType))]
+    .sort((a, b) => (ISSUE_ORDER.indexOf(a) + 1 || 99) - (ISSUE_ORDER.indexOf(b) + 1 || 99));
+  const by = {};
+  rows.forEach(r => { const v = by[r.vertical] || (by[r.vertical] = { n: 0, t: {} }); v.n++; v.t[r.issueType] = (v.t[r.issueType] || 0) + 1; });
+  const list = Object.entries(by).sort((a, b) => b[1].n - a[1].n);
+  const noIssue = t => /^no issues?$/i.test(t);
+  $("tRoot").innerHTML =
+    `<thead><tr><th>Vertical</th><th class="n">Audits</th>${types.map(t => `<th class="n">${esc(t)}</th>`).join("")}<th class="n">Issue rate</th></tr></thead><tbody>` +
+    list.map(([v, d]) => {
+      const withIssue = d.n - Object.entries(d.t).filter(([t]) => noIssue(t)).reduce((s, [, c]) => s + c, 0);
+      return `<tr><td>${esc(v)}</td><td class="n">${d.n}</td>` +
+        types.map(t => { const c = d.t[t] || 0; const sh = c / d.n;
+          const bg = c ? `background:rgba(18,105,95,${(0.06 + sh * 0.55).toFixed(3)})` : "";
+          return `<td class="heat" style="${bg}">${c || "·"}</td>`; }).join("") +
+        `<td class="n">${pct(withIssue / d.n, 1)}</td></tr>`;
+    }).join("") + `</tbody>` +
+    `<tfoot><tr><td colspan="${types.length + 3}" class="foot">Issue rate = audits with any recorded issue type ÷ audits. Shading is the share within each vertical's own row.</td></tr></tfoot>`;
+
+  // risk population ownership
+  const risk = rows.filter(isRisk);
+  const c = {}; risk.forEach(r => c[r.issueType] = (c[r.issueType] || 0) + 1);
+  const labels = Object.keys(c).sort((a, b) => c[b] - c[a]);
+  if (charts.root) charts.root.destroy();
+  if (labels.length) {
+    charts.root = new Chart($("chRoot"), {
+      type: "bar",
+      data: { labels, datasets: [{ label: "Tier C/D audits", data: labels.map(l => c[l]), backgroundColor: "#3D6E68" }] },
+      options: { indexAxis: "y", maintainAspectRatio: false, plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, grid: { color: "#EAEFED" } }, y: { grid: { display: false } } } }
+    });
+  }
+
+  const others = rows.filter(r => /^others?$/i.test(r.issueType)).length;
+  const agentOnly = rows.filter(r => /^agent issue$/i.test(r.issueType)).length;
+  const product = rows.filter(r => /product/i.test(r.issueType)).length;
+  $("othersBox").innerHTML = `<ul class="tight">
+    <li><b>${num(others)} audits (${pct(others / (m.n || 1), 1)})</b> are classified as "Others" — too large to be a final answer for leadership, because nobody can own it.</li>
+    <li>Product-related issues: <b>${num(product)}</b>. Agent-only issues: <b>${num(agentOnly)}</b>. Where product outweighs agent, training alone will not move the score.</li>
+    <li>Recommended second level for "Others": customer or process, system limitation, information gap, policy ambiguity, agent opportunity, product limitation, or other with a mandatory note.</li>
+    <li>Track the share of "Others" down month over month — it is a QC process metric in its own right.</li>
+  </ul>`;
+}
+
+/* ---------- agents ---------- */
+function agentStats(rows) {
+  const by = {};
+  rows.forEach(r => {
+    const a = by[r.agent] || (by[r.agent] = { agent: r.agent, n: 0, s: 0, sc: 0, c: 0, d: 0, risk: [], aht: 0, pol: 0, nRand: 0, riskRand: 0 });
+    a.n++; if (r.score != null) { a.s += r.score; a.sc++; }
+    if (isTierC(r)) a.c++; if (isTierD(r)) a.d++; if (isRisk(r)) a.risk.push(r);
+    if (isAht(r)) a.aht++; if (isPolicyGap(r)) a.pol++;
+  });
+  rows.forEach(r => { const a = by[r.agent]; if (isRandomAudit(r)) { a.nRand++; if (isRisk(r)) a.riskRand++; } });
+  return Object.values(by).map(a => {
+    const rs = a.risk.filter(r => r.score != null);
+    const tr = topReason(a.risk);
+    const avgRisk = rs.length ? rs.reduce((s, r) => s + r.score, 0) / rs.length : null;
+    let priority = "Monitor";
+    if (a.d >= 2 || (avgRisk != null && avgRisk < 80)) priority = "High";
+    else if (avgRisk != null && avgRisk < 90) priority = "Medium";
+    return { ...a, avgQA: a.sc ? a.s / a.sc : null, riskN: a.risk.length,
+      riskRate: a.n ? a.risk.length / a.n : 0,
+      riskRandom: a.nRand ? a.riskRand / a.nRand : null,
+      invShare: a.n ? (a.n - a.nRand) / a.n : 0,
+      avgRisk, topReason: tr.label, topReasonN: tr.n, priority };
+  });
+}
+function repeatAgents(rows) {
+  return agentStats(rows).filter(a => a.riskN >= REPEAT_MIN)
+    .sort((a, b) => b.riskRate - a.riskRate || b.riskN - a.riskN);
+}
+const prioPill = p => `<span class="pill ${p === "High" ? "high" : p === "Medium" ? "med" : "mon"}">${p}</span>`;
+
+function renderAgents(rows) {
+  const rep = repeatAgents(rows);
+  const el = $("tRepeat");
+  if (!rep.length) { el.innerHTML = `<tbody><tr><td class="empty">No agent has ${REPEAT_MIN} or more Tier C/D audits in this period.</td></tr></tbody>`; }
+  else {
+    el.innerHTML =
+      `<thead><tr><th>Agent</th><th class="n">Total audits</th><th class="n">Investigative</th><th class="n">Avg QA</th><th class="n">Risk audits</th>
+       <th>Risk rate (all)</th><th class="n">Risk rate (random only)</th><th class="n">Tier C</th><th class="n">Tier D</th><th class="n">Avg risk score</th>
+       <th>Top recurring reason</th><th class="n">×</th><th>Priority</th></tr></thead><tbody>` +
+      rep.map(a => `<tr><td>${esc(a.agent)}</td><td class="n">${a.n}</td>
+        <td class="n">${a.invShare > 0.25 ? `<span class="lown" title="Over a quarter of this agent's audits were opened because something went wrong">${pct(a.invShare, 0)}</span>` : pct(a.invShare, 0)}</td>
+        <td class="n">${a.avgQA != null ? a.avgQA.toFixed(1) + "%" : "—"}</td><td class="n">${a.riskN}</td>
+        <td class="bar"><span style="width:${(a.riskRate * 100).toFixed(1)}%"></span><b>${pct(a.riskRate, 1)}</b></td>
+        <td class="n">${a.riskRandom != null ? pct(a.riskRandom, 1) + (a.nRand < 8 ? ' <span class="lown">†</span>' : "") : "—"}</td>
+        <td class="n">${a.c}</td><td class="n">${a.d}</td>
+        <td class="n">${a.avgRisk != null ? a.avgRisk.toFixed(1) + "%" : "—"}</td>
+        <td>${a.topReasonN >= 2 ? esc(a.topReason) : '<span style="color:var(--ink3)">no repeating reason</span>'}</td>
+        <td class="n">${a.topReasonN >= 2 ? a.topReasonN : "—"}</td><td>${prioPill(a.priority)}</td></tr>`).join("") +
+      `</tbody><tfoot><tr><td colspan="13" class="foot">High = 2 or more Tier D audits, or an average risk score below 80%. Medium = average risk score below 90%. A coaching prioritisation rule, not a performance rating.<br>
+      <b>Compare agents on the random-only column.</b> CSAT, targeted and complaint audits are opened because something already went wrong, so an agent with a high investigative share will always look worse on the all-audits rate. <span class="lown">†</span> fewer than 8 random audits — not enough for an individual comparison.</td></tr></tfoot>`;
+  }
+
+  const c = {};
+  rows.filter(isRisk).forEach(r => { const k = [r.agent, r.vertical, r.reason].join("||"); c[k] = (c[k] || 0) + 1; });
+  const pat = Object.entries(c).filter(([, n]) => n >= 2).map(([k, n]) => { const [a, v, rs] = k.split("||"); return { a, v, rs, n }; })
+    .sort((x, y) => y.n - x.n);
+  $("tPattern").innerHTML = pat.length
+    ? `<thead><tr><th>Agent</th><th>Vertical</th><th>Call reason</th><th class="n">Occurrences</th></tr></thead><tbody>` +
+      pat.map(p => `<tr><td>${esc(p.a)}</td><td>${esc(p.v)}</td><td>${esc(p.rs)}</td><td class="n">${p.n}</td></tr>`).join("") + `</tbody>`
+    : `<tbody><tr><td class="empty">No repeated agent–vertical–reason combination in this period.</td></tr></tbody>`;
+
+  const all = agentStats(rows).sort((a, b) => (b.riskRate - a.riskRate) || (b.n - a.n));
+  $("tAgents").innerHTML =
+    `<thead><tr><th>Agent</th><th class="n">Audits</th><th class="n">Random</th><th class="n">Avg QA</th><th class="n">Tier C</th><th class="n">Tier D</th>
+     <th class="n">Risk rate (all)</th><th class="n">Risk rate (random)</th><th class="n">Policy gaps</th><th class="n">AHT exceptions</th></tr></thead><tbody>` +
+    all.map(a => `<tr><td>${esc(a.agent)}</td><td class="n">${a.n}</td><td class="n">${a.nRand}</td>
+      <td class="n">${a.avgQA != null ? a.avgQA.toFixed(1) + "%" : "—"}</td><td class="n">${a.c}</td><td class="n">${a.d}</td>
+      <td class="n">${pct(a.riskRate, 1)}</td>
+      <td class="n">${a.riskRandom != null ? pct(a.riskRandom, 1) + (a.nRand < 8 ? ' <span class="lown">†</span>' : "") : "—"}</td>
+      <td class="n">${a.pol}</td><td class="n">${a.aht}</td></tr>`).join("") +
+    `</tbody><tfoot><tr><td colspan="10" class="foot">Agents with fewer than 3 audits carry too little evidence for an individual conversation. <span class="lown">†</span> fewer than 8 random audits — the random-only rate is indicative, not comparable.</td></tr></tfoot>`;
+}
+
+/* ---------- QC team ---------- */
+function renderQc(rows, m) {
+  const by = {};
+  rows.forEach(r => {
+    const q = by[r.qcAgent] || (by[r.qcAgent] = { n: 0, s: 0, sc: 0, a: 0, b: 0, c: 0, d: 0, agents: new Set(), days: new Set() });
+    q.n++; if (r.score != null) { q.s += r.score; q.sc++; }
+    if (r.tier === "Tier A") q.a++; if (r.tier === "Tier B") q.b++;
+    if (isTierC(r)) q.c++; if (isTierD(r)) q.d++;
+    q.agents.add(r.agent); if (r.auditDate) q.days.add(dayKey(r.auditDate));
+  });
+  const list = Object.entries(by).map(([k, v]) => ({ qc: k, ...v, avg: v.sc ? v.s / v.sc : null, riskRate: (v.c + v.d) / v.n }))
+    .sort((a, b) => b.n - a.n);
+  const avgs = list.filter(x => x.avg != null).map(x => x.avg);
+  const spread = avgs.length > 1 ? Math.max(...avgs) - Math.min(...avgs) : 0;
+  $("tQc").innerHTML =
+    `<thead><tr><th>QC auditor</th><th class="n">Audits</th><th class="n">Share</th><th class="n">Agents covered</th>
+     <th class="n">Active days</th><th class="n">Audits/day</th><th class="n">Avg score given</th><th class="n">Risk rate found</th>
+     <th class="n">A</th><th class="n">B</th><th class="n">C</th><th class="n">D</th></tr></thead><tbody>` +
+    list.map(x => `<tr><td>${esc(x.qc)}</td><td class="n">${x.n}</td><td class="n">${pct(x.n / m.n, 1)}</td>
+      <td class="n">${x.agents.size}</td><td class="n">${x.days.size || "—"}</td>
+      <td class="n">${x.days.size ? (x.n / x.days.size).toFixed(1) : "—"}</td>
+      <td class="n">${x.avg != null ? x.avg.toFixed(1) + "%" : "—"}</td><td class="n">${pct(x.riskRate, 1)}</td>
+      <td class="n">${x.a}</td><td class="n">${x.b}</td><td class="n">${x.c}</td><td class="n">${x.d}</td></tr>`).join("") +
+    `</tbody><tfoot><tr><td colspan="12" class="foot">Spread between the most and least generous auditor: ${spread.toFixed(1)} points of average score.${spread > 3 ? " Above 3 points, run a calibration session before acting on agent-level differences." : ""}</td></tr></tfoot>`;
+
+  if (charts.qc) charts.qc.destroy();
+  if (list.length) {
+    charts.qc = new Chart($("chQc"), {
+      type: "bar",
+      data: { labels: list.map(x => x.qc),
+        datasets: [
+          { label: "Tier A", data: list.map(x => x.a / x.n * 100), backgroundColor: "#12695F" },
+          { label: "Tier B", data: list.map(x => x.b / x.n * 100), backgroundColor: "#6E8F52" },
+          { label: "Tier C", data: list.map(x => x.c / x.n * 100), backgroundColor: "#C08319" },
+          { label: "Tier D", data: list.map(x => x.d / x.n * 100), backgroundColor: "#A8302A" }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { boxWidth: 12 } },
+          tooltip: { callbacks: { label: c => c.dataset.label + ": " + c.parsed.y.toFixed(1) + "%" } } },
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, max: 100, title: { display: true, text: "% of that auditor's audits" }, grid: { color: "#EAEFED" } } } }
+    });
+  }
+
+  const yes = rows.filter(r => /^y(es)?$/i.test(r.fbSent)).length;
+  const no = rows.filter(r => /^n(o)?$/i.test(r.fbSent)).length;
+  const blank = rows.length - yes - no;
+  $("fbBox").innerHTML = `<ul class="tight">
+    <li>Feedback recorded as sent: <b>${num(yes)}</b>. Recorded as not sent: <b>${num(no)}</b>. Left blank: <b>${num(blank)}</b> (${pct(blank / (rows.length || 1), 1)}).</li>
+    <li>Blank is not the same as "no". Until the field is filled on every audit, coaching closure cannot be reported and the QC effectiveness loop stays open.</li>
+    <li>The closed loop needs four more fields captured per audit: coaching completed date, re-audit reference, pre-coaching score and post-coaching score. Once those exist this dashboard can report improvement rather than activity.</li>
+  </ul>`;
+}
+
+/* ---------- data quality ---------- */
+function renderQuality(rows, m) {
+  const dates = rows.map(r => r.auditDate).filter(Boolean).sort((a, b) => a - b);
+  const cd = rows.map(r => r.callDate).filter(Boolean).sort((a, b) => a - b);
+  const fmt = d => d ? d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—";
+  $("dqSummary").innerHTML = `<ul class="tight">
+    <li>${num(rows.length)} audit records in the current selection, from a file of ${num(ALL.length)}.</li>
+    <li>Audit dates ${fmt(dates[0])} to ${fmt(dates[dates.length - 1])}. Call dates ${fmt(cd[0])} to ${fmt(cd[cd.length - 1])}.</li>
+    <li>${new Set(rows.map(r => r.agent)).size} agents, ${new Set(rows.map(r => r.qcAgent)).size} QC auditors, ${new Set(rows.map(r => r.vertical)).size} verticals.</li>
+    <li>Caller phone, confirmation number and remarks were detected in the file and deliberately excluded from every view and every export on this page.</li>
+  </ul>`;
+
+  const merges = [...mergeLog.entries()].map(([canon, m2]) => ({ canon, from: [...m2.entries()].sort((a, b) => b[1] - a[1]) }))
+    .filter(x => x.from.some(f => f[0] !== x.canon)).sort((a, b) => b.from.reduce((s, f) => s + f[1], 0) - a.from.reduce((s, f) => s + f[1], 0));
+  $("tMerge").innerHTML = merges.length
+    ? `<thead><tr><th>Grouped as</th><th>Original labels in the file</th><th class="n">Records</th></tr></thead><tbody>` +
+      merges.map(x => `<tr><td>${esc(x.canon)}</td>
+        <td>${x.from.map(f => `${esc(f[0])} <span class="mono" style="color:var(--ink3)">×${f[1]}</span>`).join(" &nbsp;· ")}</td>
+        <td class="n">${x.from.reduce((s, f) => s + f[1], 0)}</td></tr>`).join("") + `</tbody>`
+    : `<tbody><tr><td class="empty">No label variants needed merging in this file.</td></tr></tbody>`;
+
+  const fields = [["Handle time appropriateness", "handleTime"], ["Follow-up timeliness", "followup"], ["Feedback sent", "fbSent"],
+    ["Issue type", "issueType"], ["Call reason", "reasonRaw"], ["Sub reason", "subReason"], ["Customer sentiment uplift", "sentiment"],
+    ["QC auditor", "qcAgent"], ["Audit type", "auditType"], ["Total score", "score"], ["Feedback category", "tier"]];
+  $("tBlank").innerHTML =
+    `<thead><tr><th>Field</th><th class="n">Populated</th><th>Completeness</th></tr></thead><tbody>` +
+    fields.map(([l, k]) => {
+      const f = rows.filter(r => r[k] != null && r[k] !== "" && r[k] !== "Not recorded").length;
+      const p = rows.length ? f / rows.length : 0;
+      return `<tr><td>${esc(l)}</td><td class="n">${f} / ${rows.length}</td>
+        <td class="bar"><span style="width:${(p * 100).toFixed(1)}%"></span><b>${pct(p, 1)}</b></td></tr>`;
+    }).join("") + `</tbody>`;
+
+  const issues = [];
+  const noHt = rows.filter(r => !r.handleTime).length;
+  if (noHt) issues.push(`${noHt} audits have no handle-time assessment. The handle-time exception rate is calculated on the ${m.ahtBase} that do.`);
+  const unknownReason = rows.filter(r => r.reason === UNKNOWN).length;
+  if (unknownReason) issues.push(`${unknownReason} audits have no usable call reason — blank, "NA", or a confirmation number typed into the reason field. These cannot be routed to a process owner.`);
+  if (dates.length) {
+    const monthOf = d => d.getFullYear() * 12 + d.getMonth();
+    const mode = {}; dates.forEach(d => mode[monthOf(d)] = (mode[monthOf(d)] || 0) + 1);
+    const main = +Object.entries(mode).sort((a, b) => b[1] - a[1])[0][0];
+    const stray = dates.filter(d => monthOf(d) !== main).length;
+    if (stray) issues.push(`${stray} audits carry an audit date outside the main reporting month. Check whether they belong in this cycle.`);
+  }
+  const oldCalls = rows.filter(r => r.callDate && r.auditDate && (r.auditDate - r.callDate) > 45 * 86400000).length;
+  if (oldCalls) issues.push(`${oldCalls} audits reference a call more than 45 days before the audit date. Usually a typo in the call date rather than a genuine back-audit.`);
+  const noScore = rows.filter(r => r.score == null).length;
+  if (noScore) issues.push(`${noScore} audits have no total score and are excluded from every average.`);
+  const thin = Object.values(rows.reduce((a, r) => { a[r.agent] = (a[r.agent] || 0) + 1; return a; }, {})).filter(c => c < 3).length;
+  if (thin) issues.push(`${thin} agents have fewer than 3 audits — reportable in aggregate, not individually.`);
+  $("dqIssues").innerHTML = issues.length
+    ? `<ul class="tight">${issues.map(i => `<li>${i}</li>`).join("")}</ul>`
+    : `<div class="flag ok">No structural issues found in this selection.</div>`;
+}
+
+/* ============================================================
+   10. EXPORT  (summary only — no PII, no audit-level rows)
+============================================================ */
+function exportSummary() {
+  const rows = VIEW, m = metrics(rows);
+  const wb = XLSX.utils.book_new();
+  const add = (name, aoa) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name.slice(0, 31));
+
+  add("Executive", [["Metric", "Value"],
+    ["Audits", m.n], ["Agents audited", m.agents], ["Average QA", m.avgQA], ["Scoring 90% or above", m.ge90],
+    ["First contact resolution", m.fcr], ["SOP compliance", m.policy], ["CRM accuracy", m.crm],
+    ["Critical script", m.script], ["Empathy", m.empathy],
+    ["Tier A", m.tierA], ["Tier B", m.tierB], ["Tier C", m.tierC], ["Tier D", m.tierD],
+    ["Risk audits (C+D)", m.tierC + m.tierD], ["Handle time exceptions", m.ahtErr],
+    ["Handle time assessed", m.ahtBase],
+    ["Follow-up on time (applicable)", m.followup.rate], ["Applicable follow-ups", m.followup.base]]);
+
+  const vb = {};
+  rows.forEach(r => { const v = vb[r.vertical] || (vb[r.vertical] = { n: 0, c: 0, d: 0, aht: 0, pol: 0, s: 0, sc: 0 });
+    v.n++; if (isTierC(r)) v.c++; if (isTierD(r)) v.d++; if (isAht(r)) v.aht++; if (isPolicyGap(r)) v.pol++;
+    if (r.score != null) { v.s += r.score; v.sc++; } });
+  add("By vertical", [["Vertical", "Audits", "Share", "Avg QA", "Tier C", "Tier D", "Risk rate", "AHT exceptions", "Policy gaps"]]
+    .concat(Object.entries(vb).sort((a, b) => b[1].n - a[1].n).map(([k, v]) =>
+      [k, v.n, v.n / m.n, v.sc ? v.s / v.sc / 100 : null, v.c, v.d, (v.c + v.d) / v.n, v.aht, v.pol])));
+
+  const vr = (filter) => { const c = {};
+    rows.filter(filter).forEach(r => { const k = r.vertical + "||" + r.reason; c[k] = (c[k] || 0) + 1; });
+    return Object.entries(c).map(([k, n]) => { const [v, rs] = k.split("||"); return [v, rs, n, n / rows.length]; })
+      .sort((a, b) => b[2] - a[2]); };
+  [["Policy gaps", isPolicyGap], ["Follow-up failures", isFollowFail], ["Tier C", isTierC], ["Tier D", isTierD], ["AHT exceptions", isAht]]
+    .forEach(([name, f]) => add(name, [["Vertical", "Call reason", "Count", "Share of all audits"]].concat(vr(f))));
+
+  add("Repeat quality risk", [["Agent", "Total audits", "Avg QA", "Risk audits", "Risk rate", "Tier C", "Tier D", "Avg risk score", "Top recurring reason", "Times", "Priority"]]
+    .concat(repeatAgents(rows).map(a => [a.agent, a.n, a.avgQA != null ? a.avgQA / 100 : null, a.riskN, a.riskRate, a.c, a.d,
+      a.avgRisk != null ? a.avgRisk / 100 : null, a.topReason, a.topReasonN, a.priority])));
+
+  const qb = {};
+  rows.forEach(r => { const q = qb[r.qcAgent] || (qb[r.qcAgent] = { n: 0, s: 0, sc: 0, c: 0, d: 0, ag: new Set() });
+    q.n++; if (r.score != null) { q.s += r.score; q.sc++; } if (isTierC(r)) q.c++; if (isTierD(r)) q.d++; q.ag.add(r.agent); });
+  add("QC team", [["QC auditor", "Audits", "Agents covered", "Avg score given", "Tier C", "Tier D", "Risk rate found"]]
+    .concat(Object.entries(qb).sort((a, b) => b[1].n - a[1].n).map(([k, q]) =>
+      [k, q.n, q.ag.size, q.sc ? q.s / q.sc / 100 : null, q.c, q.d, (q.c + q.d) / q.n])));
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, "QC_Leadership_Summary_" + stamp + ".xlsx");
+}
+
+/* ============================================================
+   11. WIRING
+============================================================ */
+(function libraryCheck() {
+  const missing = [];
+  if (typeof XLSX === "undefined") missing.push("SheetJS");
+  if (typeof Chart === "undefined") missing.push("Chart.js");
+  if (!missing.length) return;
+  $("drop").innerHTML =
+    '<p style="color:var(--bad);font-size:14px"><b>' + missing.join(" and ") +
+    ' could not be loaded.</b></p><p>The page needs these to read the workbook. ' +
+    'If you are on the corporate network, the CDN is most likely blocked — ' +
+    'use the vendored copies described in the README instead.</p>';
+  $("btnLoad").disabled = true;
+})();
+
+$("btnLoad").onclick = () => $("file").click();
+$("btnLoad2").onclick = () => $("file").click();
+$("btnExport").onclick = exportSummary;
+$("file").onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ""; };
+const dz = $("drop");
+["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("hot"); }));
+["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("hot"); }));
+dz.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+  document.querySelectorAll(".view").forEach(x => x.classList.remove("on"));
+  t.classList.add("on"); $(t.dataset.v).classList.add("on");
+});
+</script>
+</body>
+</html>
